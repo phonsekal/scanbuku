@@ -6,7 +6,7 @@ import requests
 st.set_page_config(page_title="Sistem Scan & Posting BMN Buku", layout="wide")
 
 # ⚠️ PASTIKAN URL WEB APP GOOGLE APPS SCRIPT ANDA SUDAH BENAR DI SINI
-WEB_APP_URL = "PASANG_URL_APPS_SCRIPT_ANDA_DI_SINI"
+WEB_APP_URL = "https://script.google.com/macros/s/AKfycbwbKuC3gS5Z3HxctjwlLreXdErZJhU59ND59l7y-Sj79a-86VL1CTtR8McTEIxG5n2g/exec"
 
 # Fungsi memuat data master lokal (instan dari RAM)
 @st.cache_data
@@ -71,36 +71,52 @@ if df is not None:
         if not hasil_filter.empty:
             st.success(f"Ditemukan {len(hasil_filter)} data berdasarkan pencarian di kolom **{kolom_ditemukan}**")
             
-            # Pastikan kolom utama tersedia di CSV master
-            required_cols = ['NUP', 'Merk', 'Kodefikasi']
-            if all(col in hasil_filter.columns for col in required_cols):
+            # Daftarkan kolom wajib dari CSV master
+            cols_wajib = ['NUP', 'Merk', 'Kode1', 'Kode2', 'Kode3']
+            if all(col in hasil_filter.columns for col in cols_wajib):
                 
                 # 1. Ambil data yang dibutuhkan dan ganti nama 'Merk' menjadi 'Judul'
-                df_tampil = hasil_filter[required_cols].copy()
+                df_tampil = hasil_filter[cols_wajib].copy()
                 df_tampil = df_tampil.rename(columns={'Merk': 'Judul'})
                 
-                # 2. Kelompokkan berdasarkan NUP & Judul, lalu gabungkan kodefikasi jika ada yang berbeda
-                # Menggunakan '/' sebagai penghubung jika kodenya unik dan lebih dari 1
-                df_grouped = df_tampil.groupby(['NUP', 'Judul'])['Kodefikasi'].apply(
-                    lambda x: ' / '.join(sorted(list(set(filter(None, x)))))
-                ).reset_index()
+                # 2. Fungsi lokal untuk menggabungkan Kode1, Kode2, Kode3 per baris data
+                def gabung_kode_baris(row):
+                    list_kode = [row['Kode1'], row['Kode2'], row['Kode3']]
+                    # Bersihkan spasi dan saring nilai kosong/strip bawaan sistem
+                    kode_bersih = [k.strip() for k in list_kode if k.strip() not in ["", "-", "#N/A"]]
+                    # Hilangkan duplikat dalam satu baris dengan tetap mempertahankan urutan asli
+                    kode_unik = list(dict.fromkeys(kode_bersih))
+                    return " / ".join(kode_unik) if kode_unik else "-"
+
+                df_tampil['Kodefikasi'] = df_tampil.apply(gabung_kode_baris, axis=1)
                 
-                # 3. Tambahkan kolom checklist dengan nama 'Kirim' di posisi paling kanan
+                # 3. Kelompokkan berdasarkan NUP & Judul (jika hasil pencarian menghasilkan baris kembar)
+                def gabung_grup_kode(series):
+                    gabungan = []
+                    for teks in series:
+                        pecahan = [p.strip() for p in teks.split('/') if p.strip() not in ["", "-", "#N/A"]]
+                        gabungan.extend(pecahan)
+                    unik_grup = list(dict.fromkeys(gabungan))
+                    return " / ".join(unik_grup) if unik_grup else "-"
+
+                df_grouped = df_tampil.groupby(['NUP', 'Judul'])['Kodefikasi'].apply(gabung_grup_kode).reset_index()
+                
+                # 4. Tambahkan kolom checklist dengan nama 'Kirim' di posisi paling kanan
                 df_grouped['Kirim'] = False
                 
-                # 4. Susun urutan tampilan kolom secara presisi: NUP, Kodefikasi, Judul, Kirim
+                # 5. Susun urutan kolom secara presisi: NUP, Kodefikasi, Judul, Kirim
                 df_grouped = df_grouped[['NUP', 'Kodefikasi', 'Judul', 'Kirim']]
                 
-                # 5. Tampilkan tabel interaktif (Data Editor)
+                # 6. Tampilkan tabel interaktif (Data Editor)
                 edited_df = st.data_editor(
                     df_grouped,
                     use_container_width=True,
                     hide_index=True,
-                    disabled=["NUP", "Kodefikasi", "Judul"], # Kunci data master agar aman
+                    disabled=["NUP", "Kodefikasi", "Judul"], # Kunci data agar aman dari salah ketik
                     key="editor_buku"
                 )
                 
-                # 6. Deteksi aksi klik pada kolom 'Kirim'
+                # 7. Deteksi aksi klik pada kolom 'Kirim'
                 for i in range(len(edited_df)):
                     if edited_df.iloc[i]["Kirim"] == True:
                         nup_terpilih = edited_df.iloc[i]["NUP"]
@@ -112,6 +128,6 @@ if df is not None:
                         if sukses:
                             st.toast(f"🚀 Terposting ke Google Sheets! NUP: {nup_terpilih} | Judul: {judul_terpilih}")
             else:
-                st.warning("Kolom 'NUP', 'Merk', atau 'Kodefikasi' tidak lengkap di file 'databmnbuku.csv'.")
+                st.warning("Struktur kolom 'NUP', 'Merk', 'Kode1', 'Kode2', atau 'Kode3' tidak ditemukan di CSV master.")
         else:
             st.error(f"Data dengan kata kunci '{search_query}' tidak ditemukan di seluruh kolom filter.")
