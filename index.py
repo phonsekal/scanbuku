@@ -1,89 +1,116 @@
 import streamlit as st
 import pandas as pd
+from streamlit_gsheets import GSheetsConnection
 
-# Konfigurasi halaman agar tampilan lebih luas (Wide Mode)
-st.set_page_config(page_title="Pencarian Data BMN Buku", layout="wide")
+# Konfigurasi halaman
+st.set_page_config(page_title="Sistem Scan & Posting BMN Buku", layout="wide")
 
-# Fungsi untuk memuat data ke memori (RAM) agar pencarian instan
+# Fungsi untuk memuat data master lokal
 @st.cache_data
 def load_data():
     try:
-        # 1. Menggunakan sep=';' karena file menggunakan pembatas titik koma
-        # 2. Menggunakan on_bad_lines='skip' untuk mengamankan jika ada baris yang korup/tidak konsisten
         df = pd.read_csv("databmnbuku.csv", sep=';', dtype=str, on_bad_lines='skip', encoding='utf-8')
-        
-        # Bersihkan spasi di awal/akhir pada nama kolom
         df.columns = df.columns.str.strip()
-        
-        # Hapus kolom tanpa nama (kolom kosong beruntun di sebelah kanan seperti sisa kolom AP)
         df = df.loc[:, ~df.columns.str.contains('^Unnamed:|^\s*$', case=False, na=True)]
-        
-        # Mengisi data kosong (NaN) dengan string kosong agar tidak error saat filter
         df = df.fillna("")
         return df
     except FileNotFoundError:
-        st.error("File 'databmnbuku.csv' tidak ditemukan. Pastikan file berada di folder yang sama dengan skrip ini.")
+        st.error("File 'databmnbuku.csv' tidak ditemukan.")
         return None
 
-# Memuat database buku
+# Membuat koneksi ke Google Sheets (Otomatis membaca URL dari secrets.toml)
+conn = st.connection("gsheets", type=GSheetsConnection)
+
+# Memuat database master
 df = load_data()
 
 if df is not None:
-    st.title("📚 Sistem Pencarian & Scan BMN Buku")
-    st.write("Masukkan kode atau scan barcode untuk menampilkan data NUP dan Merk secara instan.")
+    st.title("📚 Sistem Pencarian & Posting Live BMN Buku (Tanpa Kunci)")
+    st.write("Beri centang pada hasil pencarian untuk otomatis mengisi No Urut, NUP, dan Judul di Google Sheets Anda.")
     
-    # 1. Komponen Input (Otomatis Fokus untuk mempermudah scan barcode)
-    # Fitur autofocus membuat petugas bisa langsung scan tanpa perlu klik kolom input terlebih dahulu
+    # Input Scan / Cari
     search_query = st.text_input("Scan / Input Kode di sini:", key="search_input", autocomplete="off").strip()
 
-    # Urutan kolom yang akan diperiksa secara berurutan (Waterfall Filter)
-    kolom_filter = [
-        'Kode1', 'Kode2', 'Kode3', 
-        'ISBN1', 'ISBN2', 'ISBN3', 
-        'Barcode1', 'Barcode2', 'Barcode3'
-    ]
-
-    # Cek apakah nama-nama kolom di atas benar-benar ada di file CSV Anda
+    kolom_filter = ['Kode1', 'Kode2', 'Kode3', 'ISBN1', 'ISBN2', 'ISBN3', 'Barcode1', 'Barcode2', 'Barcode3']
     kolom_tersedia = [col for col in kolom_filter if col in df.columns]
 
-    # 2. Proses Pencarian Berjenjang
     if search_query:
-        hasil_filter = pd.DataFrame() # Tempat menampung hasil data yang cocok
+        hasil_filter = pd.DataFrame()
         kolom_ditemukan = ""
 
-        # Loop berurutan dari Kode1 sampai Barcode3
         for col in kolom_tersedia:
-            # Cari baris yang cocok (case-insensitive / mengabaikan huruf besar-kecil)
             match_rows = df[df[col].str.lower() == search_query.lower()]
-            
             if not match_rows.empty:
-                hasil_filter = match_rows
+                hasil_filter = match_rows.copy()
                 kolom_ditemukan = col
-                break # BERHENTI mencari jika sudah ditemukan di kolom yang lebih prioritas
+                break
 
-        # 3. Tampilkan Hasil
+        # Tampilkan Hasil jika ditemukan
         if not hasil_filter.empty:
             st.success(f"Ditemukan {len(hasil_filter)} data pada kolom **{kolom_ditemukan}**")
             
-            # Ambil hanya kolom NUP dan Merk sesuai permintaan Anda
-            kolom_tampilan = []
-            if 'NUP' in hasil_filter.columns: kolom_tampilan.append('NUP')
-            if 'Merk' in hasil_filter.columns: kolom_tampilan.append('Merk')
-            
-            # Jika kolom NUP atau Merk ternyata tidak ada di CSV, tampilkan kolom pencarian sebagai cadangan
-            if not kolom_tampilan:
-                kolom_tampilan = [kolom_ditemukan]
-                st.warning("Kolom 'NUP' atau 'Merk' tidak ditemukan di CSV. Menampilkan kolom referensi pencarian.")
-
-            # Menampilkan hasil dalam bentuk tabel Streamlit yang bersih tanpa nomor indeks bawaan
-            st.dataframe(
-                hasil_filter[kolom_tampilan], 
-                use_container_width=True,
-                hide_index=True
-            )
+            if 'NUP' in hasil_filter.columns and 'Merk' in hasil_filter.columns:
+                df_tampil = hasil_filter[['NUP', 'Merk']].copy()
+                df_tampil.insert(0, "Pilih & Posting", False)
+                
+                # Tabel Interaktif
+                edited_df = st.data_editor(
+                    df_tampil,
+                    use_container_width=True,
+                    hide_index=True,
+                    disabled=["NUP", "Merk"],
+                    key="editor_buku"
+                )
+                
+                # Deteksi Aksi Centang
+                for i in range(len(edited_df)):
+                    if edited_df.iloc[i]["Pilih & Posting"] == True:
+                        nup_terpilih = edited_df.iloc[i]["NUP"]
+                        merk_terpilih = edited_df.iloc[i]["Merk"]
+                        
+                        # --- PROSES POSTING VIA GSHEETS CONNECTION ---
+                        try:
+                            # 1. Ambil data yang sudah ada di cloud saat ini
+                            df_existing = conn.read(ttl=0) # ttl=0 memastikan data paling update yang diambil
+                            
+                            # Cek nomor urut terakhir
+                            if df_existing.empty or 'No' not in df_existing.columns:
+                                next_no = 1
+                            else:
+                                # Bersihkan baris kosong jika ada
+                                df_existing = df_existing.dropna(subset=['No'])
+                                if len(df_existing) == 0:
+                                    next_no = 1
+                                else:
+                                    next_no = int(pd.to_numeric(df_existing['No']).max()) + 1
+                            
+                            # 2. Buat baris baru
+                            new_row = pd.DataFrame([{"No": next_no, "NUP": nup_terpilih, "Judul": merk_terpilih}])
+                            
+                            # 3. Gabungkan dan update ke Google Sheets
+                            df_updated = pd.concat([df_existing, new_row], ignore_index=True)
+                            conn.update(data=df_updated)
+                            
+                            st.toast(f"🚀 Sukses! No: {next_no} | NUP: {nup_terpilih} berhasil diposting!")
+                            st.cache_data.clear() # Hapus cache agar tampilan live di bawah langsung berubah
+                        except Exception as e:
+                            st.error(f"Gagal posting data: {e}")
+                            
+            else:
+                st.warning("Kolom 'NUP' atau 'Merk' tidak lengkap di file 'databmnbuku.csv'.")
         else:
-            st.error(f"Data dengan kode '{search_query}' tidak ditemukan di seluruh urutan kolom filter.")
+            st.error(f"Data dengan kode '{search_query}' tidak ditemukan.")
             
-    # Tampilkan info total kapasitas database di bagian bawah aplikasi
+    # --- PRATINJAU LIVE DATA DI GOOGLE SHEETS ---
     st.markdown("---")
-    st.caption(f"Total kapasitas database aktif: {len(df):,} baris.")
+    st.subheader("📋 Tampilan Live Data Terposting (Google Sheets)")
+    
+    try:
+        df_live = conn.read(ttl=0)
+        if not df_live.empty:
+            st.dataframe(df_live, use_container_width=True, hide_index=True)
+            st.caption(f"Total entri tercatat di Google Sheets: {len(df_live)} baris.")
+        else:
+            st.info("Spreadsheet Anda masih kosong.")
+    except Exception as e:
+        st.info("Sedang memuat atau spreadsheet belum terisi.")
