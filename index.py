@@ -5,7 +5,10 @@ import requests
 # Konfigurasi halaman
 st.set_page_config(page_title="Sistem Scan & Posting BMN Buku", layout="wide")
 
-# Fungsi untuk memuat data master lokal
+# ⚠️ GANTI DENGAN URL APLIKASI WEB YANG ANDA COPY DARI APPS SCRIPT!
+WEB_APP_URL = "PASANG_URL_APPS_SCRIPT_ANDA_DI_SINI"
+
+# Fungsi memuat data master lokal (instan dari RAM)
 @st.cache_data
 def load_data():
     try:
@@ -18,15 +21,31 @@ def load_data():
         st.error("File 'databmnbuku.csv' tidak ditemukan.")
         return None
 
-# Membuat koneksi ke Google Sheets (Otomatis membaca URL dari secrets.toml)
-conn = st.connection("gsheets", type=GSheetsConnection)
+# Fungsi posting data langsung via Web App URL tanpa credentials.json
+def simpan_ke_google_sheets(nup, merk):
+    if WEB_APP_URL == "PASANG_URL_APPS_SCRIPT_ANDA_DI_SINI":
+        st.error("Masukkan URL Web App dari Google Apps Script terlebih dahulu di dalam kode!")
+        return False
+    try:
+        # Kirim data dalam format JSON ke Google Sheets
+        payload = {"nup": nup, "merk": merk}
+        response = requests.post(WEB_APP_URL, json=payload)
+        
+        if response.status_code == 200:
+            return True
+        else:
+            st.error(f"Gagal mengirim data. Status: {response.status_code}")
+            return False
+    except Exception as e:
+        st.error(f"Terjadi kesalahan koneksi: {e}")
+        return False
 
 # Memuat database master
 df = load_data()
 
 if df is not None:
-    st.title("📚 Sistem Pencarian & Posting Live BMN Buku (Tanpa Kunci)")
-    st.write("Beri centang pada hasil pencarian untuk otomatis mengisi No Urut, NUP, dan Judul di Google Sheets Anda.")
+    st.title("📚 Sistem Pencarian & Posting Live BMN Buku")
+    st.write("Tanpa Credentials! Beri centang pada hasil pencarian untuk langsung mengisi Google Sheets.")
     
     # Input Scan / Cari
     search_query = st.text_input("Scan / Input Kode di sini:", key="search_input", autocomplete="off").strip()
@@ -51,9 +70,11 @@ if df is not None:
             
             if 'NUP' in hasil_filter.columns and 'Merk' in hasil_filter.columns:
                 df_tampil = hasil_filter[['NUP', 'Merk']].copy()
+                
+                # Kolom checklist interaktif
                 df_tampil.insert(0, "Pilih & Posting", False)
                 
-                # Tabel Interaktif
+                # Tampilkan tabel interaktif
                 edited_df = st.data_editor(
                     df_tampil,
                     use_container_width=True,
@@ -62,55 +83,18 @@ if df is not None:
                     key="editor_buku"
                 )
                 
-                # Deteksi Aksi Centang
+                # Deteksi aksi klik checklist
                 for i in range(len(edited_df)):
                     if edited_df.iloc[i]["Pilih & Posting"] == True:
                         nup_terpilih = edited_df.iloc[i]["NUP"]
                         merk_terpilih = edited_df.iloc[i]["Merk"]
                         
-                        # --- PROSES POSTING VIA GSHEETS CONNECTION ---
-                        try:
-                            # 1. Ambil data yang sudah ada di cloud saat ini
-                            df_existing = conn.read(ttl=0) # ttl=0 memastikan data paling update yang diambil
-                            
-                            # Cek nomor urut terakhir
-                            if df_existing.empty or 'No' not in df_existing.columns:
-                                next_no = 1
-                            else:
-                                # Bersihkan baris kosong jika ada
-                                df_existing = df_existing.dropna(subset=['No'])
-                                if len(df_existing) == 0:
-                                    next_no = 1
-                                else:
-                                    next_no = int(pd.to_numeric(df_existing['No']).max()) + 1
-                            
-                            # 2. Buat baris baru
-                            new_row = pd.DataFrame([{"No": next_no, "NUP": nup_terpilih, "Judul": merk_terpilih}])
-                            
-                            # 3. Gabungkan dan update ke Google Sheets
-                            df_updated = pd.concat([df_existing, new_row], ignore_index=True)
-                            conn.update(data=df_updated)
-                            
-                            st.toast(f"🚀 Sukses! No: {next_no} | NUP: {nup_terpilih} berhasil diposting!")
-                            st.cache_data.clear() # Hapus cache agar tampilan live di bawah langsung berubah
-                        except Exception as e:
-                            st.error(f"Gagal posting data: {e}")
-                            
+                        # Jalankan fungsi kirim tanpa ribet
+                        sukses = simpan_ke_google_sheets(nup_terpilih, merk_terpilih)
+                        
+                        if sukses:
+                            st.toast(f"🚀 Terposting! NUP: {nup_terpilih} | Judul: {merk_terpilih}")
             else:
                 st.warning("Kolom 'NUP' atau 'Merk' tidak lengkap di file 'databmnbuku.csv'.")
         else:
             st.error(f"Data dengan kode '{search_query}' tidak ditemukan.")
-            
-    # --- PRATINJAU LIVE DATA DI GOOGLE SHEETS ---
-    st.markdown("---")
-    st.subheader("📋 Tampilan Live Data Terposting (Google Sheets)")
-    
-    try:
-        df_live = conn.read(ttl=0)
-        if not df_live.empty:
-            st.dataframe(df_live, use_container_width=True, hide_index=True)
-            st.caption(f"Total entri tercatat di Google Sheets: {len(df_live)} baris.")
-        else:
-            st.info("Spreadsheet Anda masih kosong.")
-    except Exception as e:
-        st.info("Sedang memuat atau spreadsheet belum terisi.")
