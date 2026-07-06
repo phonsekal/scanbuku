@@ -54,7 +54,7 @@ if df is not None:
         search_query = st.text_input("Scan / Input Kode di sini:", autocomplete="off").strip()
         submit_button = st.form_submit_button(label="🔍 Cari Data", type="primary")
 
-    kolom_filter = ['Kode1', 'Kode2', 'Kode3', 'ISBN1', 'ISBN2', 'ISBN3', 'Barcode1', 'Barcode2', 'Barcode3']
+    kolom_filter = ['Kode1', 'Kode2', 'Kode3', 'ISBN1', 'ISBN2', 'ISBN3', 'Barcode1', 'Barcode2', 'Barcode3', 'Merk']
     kolom_tersedia = [col for col in kolom_filter if col in df.columns]
 
     # 2. Proses Pencarian (Hanya berjalan jika tombol Cari diklik / Enter ditekan di dalam form)
