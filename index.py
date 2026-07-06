@@ -6,7 +6,7 @@ import requests
 st.set_page_config(page_title="Sistem Scan & Posting BMN Buku", layout="wide")
 
 # ⚠️ GANTI DENGAN URL APLIKASI WEB YANG ANDA COPY DARI APPS SCRIPT!
-WEB_APP_URL = "PASANG_URL_APPS_SCRIPT_ANDA_DI_SINI"
+WEB_APP_URL = "https://script.google.com/macros/s/AKfycbwbKuC3gS5Z3HxctjwlLreXdErZJhU59ND59l7y-Sj79a-86VL1CTtR8McTEIxG5n2g/exec"
 
 # Fungsi memuat data master lokal (instan dari RAM)
 @st.cache_data
