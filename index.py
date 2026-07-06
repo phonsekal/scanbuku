@@ -2,10 +2,10 @@ import streamlit as st
 import pandas as pd
 import requests
 
-# Konfigurasi halaman
+# Konfigurasi halaman agar tampilan lebar (Wide Mode)
 st.set_page_config(page_title="Sistem Scan & Posting BMN Buku", layout="wide")
 
-# ⚠️ GANTI DENGAN URL APLIKASI WEB YANG ANDA COPY DARI APPS SCRIPT!
+# ⚠️ PASTIKAN URL WEB APP GOOGLE APPS SCRIPT ANDA SUDAH BENAR DI SINI
 WEB_APP_URL = "https://script.google.com/macros/s/AKfycbwbKuC3gS5Z3HxctjwlLreXdErZJhU59ND59l7y-Sj79a-86VL1CTtR8McTEIxG5n2g/exec"
 
 # Fungsi memuat data master lokal (instan dari RAM)
@@ -21,23 +21,17 @@ def load_data():
         st.error("File 'databmnbuku.csv' tidak ditemukan.")
         return None
 
-# Fungsi posting data langsung via Web App URL tanpa credentials.json
+# Fungsi posting data langsung via Web App URL
 def simpan_ke_google_sheets(nup, merk):
     if WEB_APP_URL == "PASANG_URL_APPS_SCRIPT_ANDA_DI_SINI":
         st.error("Masukkan URL Web App dari Google Apps Script terlebih dahulu di dalam kode!")
         return False
     try:
-        # Kirim data dalam format JSON ke Google Sheets
         payload = {"nup": nup, "merk": merk}
         response = requests.post(WEB_APP_URL, json=payload)
-        
-        if response.status_code == 200:
-            return True
-        else:
-            st.error(f"Gagal mengirim data. Status: {response.status_code}")
-            return False
+        return response.status_code == 200
     except Exception as e:
-        st.error(f"Terjadi kesalahan koneksi: {e}")
+        st.error(f"Terjadi kesalahan koneksi ke Google Sheets: {e}")
         return False
 
 # Memuat database master
@@ -45,7 +39,7 @@ df = load_data()
 
 if df is not None:
     st.title("📚 Sistem Pencarian & Posting Live BMN Buku")
-    st.write("Tanpa Credentials! Beri centang pada hasil pencarian untuk langsung mengisi Google Sheets.")
+    st.write("Pencarian fleksibel (bisa sebagian kode, abaikan spasi/titik). Centang kolom 'Kirim' untuk memposting.")
     
     # Input Scan / Cari
     search_query = st.text_input("Scan / Input Kode di sini:", key="search_input", autocomplete="off").strip()
@@ -54,11 +48,20 @@ if df is not None:
     kolom_tersedia = [col for col in kolom_filter if col in df.columns]
 
     if search_query:
+        # Bersihkan input user dari spasi dan titik untuk pencarian yang fleksibel
+        query_clean = search_query.replace(" ", "").replace(".", "").lower()
+        
         hasil_filter = pd.DataFrame()
         kolom_ditemukan = ""
 
+        # Proses pencarian berjenjang (Waterfall) dengan pencocokan sebagian (Contains)
         for col in kolom_tersedia:
-            match_rows = df[df[col].str.lower() == search_query.lower()]
+            # Bersihkan juga data di kolom database dari spasi dan titik untuk perbandingan yang adil
+            kolom_clean = df[col].str.replace(" ", "", regex=False).str.replace(".", "", regex=False).str.lower()
+            
+            # Cari apakah query ada di dalam text kolom (Partial Match)
+            match_rows = df[kolom_clean.str.contains(query_clean, na=False)]
+            
             if not match_rows.empty:
                 hasil_filter = match_rows.copy()
                 kolom_ditemukan = col
@@ -66,35 +69,40 @@ if df is not None:
 
         # Tampilkan Hasil jika ditemukan
         if not hasil_filter.empty:
-            st.success(f"Ditemukan {len(hasil_filter)} data pada kolom **{kolom_ditemukan}**")
+            st.success(f"Ditemukan {len(hasil_filter)} data berdasarkan pencarian di kolom **{kolom_ditemukan}**")
             
             if 'NUP' in hasil_filter.columns and 'Merk' in hasil_filter.columns:
+                # 1. Ambil data NUP dan Merk, lalu rename Merk menjadi 'Judul'
                 df_tampil = hasil_filter[['NUP', 'Merk']].copy()
+                df_tampil = df_tampil.rename(columns={'Merk': 'Judul'})
                 
-                # Kolom checklist interaktif
-                df_tampil.insert(0, "Pilih & Posting", False)
+                # 2. Tambahkan kolom checklist dengan nama 'Kirim' di posisi paling kanan
+                df_tampil['Kirim'] = False
                 
-                # Tampilkan tabel interaktif
+                # 3. Urutkan tampilan kolom: NUP, Judul, Kirim
+                df_tampil = df_tampil[['NUP', 'Judul', 'Kirim']]
+                
+                # 4. Tampilkan tabel interaktif (Data Editor)
                 edited_df = st.data_editor(
                     df_tampil,
                     use_container_width=True,
                     hide_index=True,
-                    disabled=["NUP", "Merk"],
+                    disabled=["NUP", "Judul"], # Kunci data agar tidak sengaja terubah
                     key="editor_buku"
                 )
                 
-                # Deteksi aksi klik checklist
+                # 5. Deteksi aksi klik pada kolom 'Kirim'
                 for i in range(len(edited_df)):
-                    if edited_df.iloc[i]["Pilih & Posting"] == True:
+                    if edited_df.iloc[i]["Kirim"] == True:
                         nup_terpilih = edited_df.iloc[i]["NUP"]
-                        merk_terpilih = edited_df.iloc[i]["Merk"]
+                        judul_terpilih = edited_df.iloc[i]["Judul"]
                         
-                        # Jalankan fungsi kirim tanpa ribet
-                        sukses = simpan_ke_google_sheets(nup_terpilih, merk_terpilih)
+                        # Jalankan fungsi kirim (Kirim Judul ke parameter merk di Apps Script)
+                        sukses = simpan_ke_google_sheets(nup_terpilih, judul_terpilih)
                         
                         if sukses:
-                            st.toast(f"🚀 Terposting! NUP: {nup_terpilih} | Judul: {merk_terpilih}")
+                            st.toast(f"🚀 Terposting ke Google Sheets! NUP: {nup_terpilih} | Judul: {judul_terpilih}")
             else:
                 st.warning("Kolom 'NUP' atau 'Merk' tidak lengkap di file 'databmnbuku.csv'.")
         else:
-            st.error(f"Data dengan kode '{search_query}' tidak ditemukan.")
+            st.error(f"Data dengan kata kunci '{search_query}' tidak ditemukan di seluruh kolom filter.")
