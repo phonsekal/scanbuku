@@ -51,7 +51,7 @@ if df is not None:
 
     # 1. Menggunakan st.form untuk menampung Input Teks dan Tombol Fisik Cari
     with st.form(key="search_form", clear_on_submit=False):
-        search_query = st.text_input("Scan / Input Kode di sini:", autocomplete="off").strip()
+        search_query = st.text_input("Input Kode atau judul di sini:", autocomplete="off").strip()
         submit_button = st.form_submit_button(label="🔍 Cari Data", type="primary")
 
     kolom_filter = ['Kode1', 'Kode2', 'Kode3', 'ISBN1', 'ISBN2', 'ISBN3', 'Barcode1', 'Barcode2', 'Barcode3', 'Merk']
