@@ -3,9 +3,9 @@ import pandas as pd
 import requests
 
 # Konfigurasi halaman agar tampilan lebar (Wide Mode)
-st.set_page_config(page_title="Sistem Scan & Posting BMN Buku", layout="wide")
+st.set_page_config(page_title="Inventarisasi BMN Sekretariat Badan Pengembangan dan Pembinaan Bahasa", layout="wide")
 
-# ⚠️ PASTIKAN URL WEB APP GOOGLE APPS SCRIPT ANDA SUDAH BENAR DI SINI
+# URL WEB APP GOOGLE APPS SCRIPT yang sudah Anda sesuaikan
 WEB_APP_URL = "https://script.google.com/macros/s/AKfycbyVCt37xvsX_oiNsw-AX99RW2SC4gU0K0qOMJvcY0909zqGMC1J1eaUbZOMrRI1oOXh/exec"
 
 # Fungsi memuat data master lokal (instan dari RAM)
@@ -23,7 +23,7 @@ def load_data():
 
 # Fungsi posting data langsung via Web App URL
 def simpan_ke_google_sheets(nup, merk):
-    if WEB_APP_URL == "PASANG_URL_APPS_SCRIPT_ANDA_DI_SINI":
+    if "PASANG_URL" in WEB_APP_URL:
         st.error("Masukkan URL Web App dari Google Apps Script terlebih dahulu di dalam kode!")
         return False
     try:
@@ -38,16 +38,22 @@ def simpan_ke_google_sheets(nup, merk):
 df = load_data()
 
 if df is not None:
-    st.title("📚 Sistem Pencarian & Posting Live BMN Buku")
-    st.write("Pencarian fleksibel (bisa sebagian kode, abaikan spasi/titik). Centang kolom 'Kirim' untuk memposting.")
+    st.title("Sistem Inventarisasi Buku Perpustakaan Badan Bahasa 2026")
+    st.write("Sistem pencarian buku berdasarkan kodefikasi SLIMS")
     
-    # Input Scan / Cari
-    search_query = st.text_input("Scan / Input Kode di sini:", key="search_input", autocomplete="off").strip()
+    # 1. Menggunakan st.form untuk menampung Input Teks dan Tombol Fisik Cari
+    with st.form(key="search_form", clear_on_submit=False):
+        # Input Scan / Cari
+        search_query = st.text_input("Scan / Input Kode di sini:", autocomplete="off").strip()
+        
+        # Tombol Fisik untuk memicu pencarian (menghilangkan paksaan press enter)
+        submit_button = st.form_submit_button(label="🔍 Cari Data", type="primary")
 
     kolom_filter = ['Kode1', 'Kode2', 'Kode3', 'ISBN1', 'ISBN2', 'ISBN3', 'Barcode1', 'Barcode2', 'Barcode3']
     kolom_tersedia = [col for col in kolom_filter if col in df.columns]
 
-    if search_query:
+    # 2. Proses Pencarian (Berjalan jika tombol diklik ATAU enter ditekan di dalam form)
+    if submit_button and search_query:
         # Bersihkan input user dari spasi dan titik untuk pencarian yang fleksibel
         query_clean = search_query.replace(" ", "").replace(".", "").lower()
         
@@ -131,3 +137,7 @@ if df is not None:
                 st.warning("Struktur kolom 'NUP', 'Merk', 'Kode1', 'Kode2', atau 'Kode3' tidak ditemukan di CSV master.")
         else:
             st.error(f"Data dengan kata kunci '{search_query}' tidak ditemukan di seluruh kolom filter.")
+            
+    # Jika tombol diklik namun input teksnya kosong
+    elif submit_button and not search_query:
+        st.warning("Silakan masukkan kata kunci kode atau scan barcode terlebih dahulu!")
