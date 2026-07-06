@@ -24,7 +24,7 @@ def load_data():
 # Fungsi posting data langsung via Web App URL
 def simpan_ke_google_sheets(nup, merk):
     if "PASANG_URL" in WEB_APP_URL:
-        st.error("Masukkan URL Web App dari Google Apps Script terlebih dahulu di dalam kode!")
+        st.error("Masukkan URL Web App dari Google Apps Script terlebih dadaulu di dalam kode!")
         return False
     try:
         payload = {"nup": nup, "merk": merk}
@@ -41,62 +41,81 @@ if df is not None:
     st.title("Sistem Inventarisasi Buku Perpustakaan Badan Bahasa 2026")
     st.write("Sistem pencarian buku berdasarkan kodefikasi SLIMS")
     
+    # Inisialisasi session state untuk menyimpan hasil pencarian agar tidak hilang saat klik centang
+    if "hasil_pencarian" not in st.session_state:
+        st.session_state.hasil_pencarian = None
+    if "kolom_ditemukan" not in st.session_state:
+        st.session_state.kolom_ditemukan = ""
+
     # 1. Menggunakan st.form untuk menampung Input Teks dan Tombol Fisik Cari
     with st.form(key="search_form", clear_on_submit=False):
         # Input Scan / Cari
         search_query = st.text_input("Scan / Input Kode di sini:", autocomplete="off").strip()
         
-        # Tombol Fisik untuk memicu pencarian (menghilangkan paksaan press enter)
+        # Tombol Fisik untuk memicu pencarian (Menghilangkan paksaan press enter bawaan)
         submit_button = st.form_submit_button(label="🔍 Cari Data", type="primary")
 
     kolom_filter = ['Kode1', 'Kode2', 'Kode3', 'ISBN1', 'ISBN2', 'ISBN3', 'Barcode1', 'Barcode2', 'Barcode3']
     kolom_tersedia = [col for col in kolom_filter if col in df.columns]
 
-    # 2. Proses Pencarian (Berjalan jika tombol diklik ATAU enter ditekan di dalam form)
-    if submit_button and search_query:
-        # Bersihkan input user dari spasi dan titik untuk pencarian yang fleksibel
-        query_clean = search_query.replace(" ", "").replace(".", "").lower()
-        
-        hasil_filter = pd.DataFrame()
-        kolom_ditemukan = ""
+    # 2. Proses Pencarian (Hanya berjalan jika tombol Cari diklik / Enter ditekan di dalam form)
+    if submit_button:
+        if search_query:
+            # Bersihkan input user dari spasi dan titik untuk pencarian yang fleksibel
+            query_clean = search_query.replace(" ", "").replace(".", "").lower()
+            hasil_filter = pd.DataFrame()
+            kolom_ditemukan = ""
 
-        # Proses pencarian berjenjang (Waterfall) dengan pencocokan sebagian (Contains)
-        for col in kolom_tersedia:
-            # Bersihkan juga data di kolom database dari spasi dan titik untuk perbandingan
-            kolom_clean = df[col].str.replace(" ", "", regex=False).str.replace(".", "", regex=False).str.lower()
-            
-            # Cari apakah query ada di dalam text kolom (Partial Match)
-            match_rows = df[kolom_clean.str.contains(query_clean, na=False)]
-            
-            if not match_rows.empty:
-                hasil_filter = match_rows.copy()
-                kolom_ditemukan = col
-                break
+            # Proses pencarian berjenjang (Waterfall) dengan pencocokan sebagian (Contains)
+            for col in kolom_tersedia:
+                # Bersihkan juga data di kolom database dari spasi dan titik untuk perbandingan
+                kolom_clean = df[col].str.replace(" ", "", regex=False).str.replace(".", "", regex=False).str.lower()
+                match_rows = df[kolom_clean.str.contains(query_clean, na=False)]
+                
+                if not match_rows.empty:
+                    hasil_filter = match_rows.copy()
+                    kolom_ditemukan = col
+                    break
 
-        # Tampilkan Hasil jika ditemukan
-        if not hasil_filter.empty:
+            # Simpan hasil atau status ke dalam session state agar awet
+            if not hasil_filter.empty:
+                st.session_state.hasil_pencarian = hasil_filter
+                st.session_state.kolom_ditemukan = kolom_ditemukan
+            else:
+                st.session_state.hasil_pencarian = "KOSONG"
+                st.session_state.kolom_ditemukan = ""
+        else:
+            st.warning("Silakan masukkan kata kunci kode atau scan barcode terlebih dahulu!")
+            st.session_state.hasil_pencarian = None
+
+    # 3. Tampilkan dan Proses Hasil dari Session State (Aman dari Rerun akibat klik checkbox)
+    if st.session_state.hasil_pencarian is not None:
+        if isinstance(st.session_state.hasil_pencarian, str) and st.session_state.hasil_pencarian == "KOSONG":
+            st.error("Data tidak ditemukan di seluruh kolom filter.")
+        elif isinstance(st.session_state.hasil_pencarian, pd.DataFrame):
+            hasil_filter = st.session_state.hasil_pencarian
+            kolom_ditemukan = st.session_state.kolom_ditemukan
+            
             st.success(f"Ditemukan {len(hasil_filter)} data berdasarkan pencarian di kolom **{kolom_ditemukan}**")
             
             # Daftarkan kolom wajib dari CSV master
             cols_wajib = ['NUP', 'Merk', 'Kode1', 'Kode2', 'Kode3']
             if all(col in hasil_filter.columns for col in cols_wajib):
                 
-                # 1. Ambil data yang dibutuhkan dan ganti nama 'Merk' menjadi 'Judul'
+                # Ambil data yang dibutuhkan dan ganti nama 'Merk' menjadi 'Judul'
                 df_tampil = hasil_filter[cols_wajib].copy()
                 df_tampil = df_tampil.rename(columns={'Merk': 'Judul'})
                 
-                # 2. Fungsi lokal untuk menggabungkan Kode1, Kode2, Kode3 per baris data
+                # Fungsi lokal untuk menggabungkan Kode1, Kode2, Kode3 per baris data
                 def gabung_kode_baris(row):
                     list_kode = [row['Kode1'], row['Kode2'], row['Kode3']]
-                    # Bersihkan spasi dan saring nilai kosong/strip bawaan sistem
                     kode_bersih = [k.strip() for k in list_kode if k.strip() not in ["", "-", "#N/A"]]
-                    # Hilangkan duplikat dalam satu baris dengan tetap mempertahankan urutan asli
                     kode_unik = list(dict.fromkeys(kode_bersih))
                     return " / ".join(kode_unik) if kode_unik else "-"
 
                 df_tampil['Kodefikasi'] = df_tampil.apply(gabung_kode_baris, axis=1)
                 
-                # 3. Kelompokkan berdasarkan NUP & Judul (jika hasil pencarian menghasilkan baris kembar)
+                # Kelompokkan berdasarkan NUP & Judul (jika hasil pencarian menghasilkan baris kembar)
                 def gabung_grup_kode(series):
                     gabungan = []
                     for teks in series:
@@ -107,13 +126,13 @@ if df is not None:
 
                 df_grouped = df_tampil.groupby(['NUP', 'Judul'])['Kodefikasi'].apply(gabung_grup_kode).reset_index()
                 
-                # 4. Tambahkan kolom checklist dengan nama 'Kirim' di posisi paling kanan
+                # Tambahkan kolom checklist dengan nama 'Kirim' di posisi paling kanan
                 df_grouped['Kirim'] = False
                 
-                # 5. Susun urutan kolom secara presisi: NUP, Kodefikasi, Judul, Kirim
+                # Susun urutan kolom secara presisi: NUP, Kodefikasi, Judul, Kirim
                 df_grouped = df_grouped[['NUP', 'Kodefikasi', 'Judul', 'Kirim']]
                 
-                # 6. Tampilkan tabel interaktif (Data Editor)
+                # Tampilkan tabel interaktif (Data Editor)
                 edited_df = st.data_editor(
                     df_grouped,
                     use_container_width=True,
@@ -122,7 +141,7 @@ if df is not None:
                     key="editor_buku"
                 )
                 
-                # 7. Deteksi aksi klik pada kolom 'Kirim'
+                # Deteksi aksi klik pada kolom 'Kirim'
                 for i in range(len(edited_df)):
                     if edited_df.iloc[i]["Kirim"] == True:
                         nup_terpilih = edited_df.iloc[i]["NUP"]
@@ -135,9 +154,3 @@ if df is not None:
                             st.toast(f"🚀 Terposting ke Google Sheets! NUP: {nup_terpilih} | Judul: {judul_terpilih}")
             else:
                 st.warning("Struktur kolom 'NUP', 'Merk', 'Kode1', 'Kode2', atau 'Kode3' tidak ditemukan di CSV master.")
-        else:
-            st.error(f"Data dengan kata kunci '{search_query}' tidak ditemukan di seluruh kolom filter.")
-            
-    # Jika tombol diklik namun input teksnya kosong
-    elif submit_button and not search_query:
-        st.warning("Silakan masukkan kata kunci kode atau scan barcode terlebih dahulu!")
